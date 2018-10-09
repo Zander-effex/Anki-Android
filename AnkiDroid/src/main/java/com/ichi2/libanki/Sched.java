@@ -57,7 +57,7 @@ public class Sched {
 
 
     // Not in libanki
-    private static final int[] FACTOR_ADDITION_VALUES = { -150, 0, 150 };
+    private static final int[] FACTOR_ADDITION_VALUES = { 0, 0, 150 };
 
     private String mName = "std";
     private boolean mHaveCustomStudy = true;
@@ -1356,7 +1356,9 @@ public class Sched {
             if (_resched(card)) {
                 card.setLapses(card.getLapses() + 1);
                 card.setIvl(_nextLapseIvl(card, conf));
-                card.setFactor(Math.max(1300, card.getFactor() - 200));
+                //card.setFactor(Math.max(1300, card.getFactor() - 200));
+                //card.setFactor(Math.max(1300, conf.getInt("initialFactor")));
+                card.setFactor(Math.max(1500, card.getFactor()));
                 card.setDue(mToday + card.getIvl());
                 // if it's a filtered deck, update odue as well
                 if (card.getODid() != 0) {
@@ -1407,23 +1409,31 @@ public class Sched {
 
 
     private void _rescheduleRev(Card card, int ease) {
-        // update interval
-        card.setLastIvl(card.getIvl());
-        if (_resched(card)) {
-            _updateRevIvl(card, ease);
-            // then the rest
-            card.setFactor(Math.max(1300, card.getFactor() + FACTOR_ADDITION_VALUES[ease - 2]));
-            card.setDue(mToday + card.getIvl());
-        } else {
-            card.setDue(card.getODue());
-        }
-        if (card.getODid() != 0) {
-            card.setDid(card.getODid());
-            card.setODid(0);
-            card.setODue(0);
-        }
+      try {
+          // update interval
+          card.setLastIvl(card.getIvl());
+          if (_resched(card)) {
+              _updateRevIvl(card, ease);
+              // then the rest
+              JSONObject conf = _revConf(card);
+              double ease_factors[] = {1.0, 1.0, (int)(1000.0*conf.getDouble("ease4"))};
+              card.setFactor(Math.max(1500,
+                                      (int)(1000.0 * (card.getFactor() / 1000.0 *
+                                                      ease_factors[ease - 2]))));
+              card.setDue(mToday + card.getIvl());
+          } else {
+              card.setDue(card.getODue());
+          }
+          if (card.getODid() != 0) {
+              card.setDid(card.getODid());
+              card.setODid(0);
+              card.setODue(0);
+          }
+      }
+      catch (JSONException e) {
+          throw new RuntimeException(e);
+      }
     }
-
 
     private void _logRev(Card card, int ease, int delay) {
         log(card.getId(), mCol.usn(), ease, ((delay != 0) ? (-delay) : card.getIvl()), card.getLastIvl(),
@@ -1441,20 +1451,13 @@ public class Sched {
      */
     private int _nextRevIvl(Card card, int ease) {
         try {
-            long delay = _daysLate(card);
-            int interval = 0;
             JSONObject conf = _revConf(card);
-            double fct = card.getFactor() / 1000.0;
-            int ivl2 = _constrainedIvl((int)((card.getIvl() + delay/4) * 1.2), conf, card.getIvl());
-            int ivl3 = _constrainedIvl((int)((card.getIvl() + delay/2) * fct), conf, ivl2);
-            int ivl4 = _constrainedIvl((int)((card.getIvl() + delay) * fct * conf.getDouble("ease4")), conf, ivl3);
-            if (ease == 2) {
-                interval = ivl2;
-            } else if (ease == 3) {
-                interval = ivl3;
-            } else if (ease == 4) {
-            	interval = ivl4;
-            }
+            //double fct = card.getFactor() / 1000.0;
+            double ease_factors[] = {1.0, 1.0, conf.getDouble("ease4")};
+            double fct = Math.max(1.1500,
+                                  card.getFactor() / 1000.0 *
+                                  ease_factors[ease - 2]);
+            int interval = _constrainedIvl((int)((card.getIvl()) * fct), conf);
             // interval capped?
             return Math.min(interval, conf.getInt("maxIvl"));
         } catch (JSONException e) {
@@ -1490,10 +1493,12 @@ public class Sched {
 
 
     /** Integer interval after interval factor and prev+1 constraints applied */
-    private int _constrainedIvl(int ivl, JSONObject conf, double prev) {
+    /* We used to make sure that each answer button is at least +1
+       the one before it.  But now we _want_ hard to have no effect */
+    private int _constrainedIvl(int ivl, JSONObject conf) {
     	double newIvl = ivl;
     	newIvl = ivl * conf.optDouble("ivlFct",1.0);
-        return (int) Math.max(newIvl, prev + 1);
+        return (int) newIvl;
     }
 
 
